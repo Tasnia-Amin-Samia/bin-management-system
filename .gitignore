@@ -1,0 +1,8 @@
+# Local secrets and editor files
+.env
+*.local
+.DS_Store
+.vscode/
+.idea/
+
+# Do not commit real credentials; configure locally before running.
