@@ -1,136 +1,114 @@
 /*
   Smart Bin Management System - ESP8266 NodeMCU + HC-SR04
-  Replace the Wi-Fi credentials, API URL, API token and bin ID before upload.
+  Replaced the Wi-Fi credentials, API URL, API token and bin ID before upload.
 
   Wiring:
     HC-SR04 VCC  -> suitable 5V supply / VIN (check board)
     HC-SR04 GND  -> GND
-    HC-SR04 TRIG -> D5 (GPIO14)
-    HC-SR04 ECHO -> D6 (GPIO12) THROUGH A VOLTAGE DIVIDER
+    HC-SR04 TRIG -> D5 (NodeMCU)
+    HC-SR04 ECHO -> D6 (NodeMCU) THROUGH A VOLTAGE DIVIDER(echo->1kohm->D6->2kohm->GND) 
   Never connect the HC-SR04 5V ECHO output directly to an ESP8266 GPIO.
 */
 
 #include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
-#include <WiFiClient.h>
+#include <BlynkSimpleEsp8266.h>
+#include <Servo.h>
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-const char* API_URL = "http://192.168.0.105/smart-bin-management-iot/api/update.php";
-const char* API_TOKEN = "CHANGE_THIS_TO_A_LONG_RANDOM_SECRET";
-const char* BIN_ID = "BIN-001";
+#define BLYNK_TEMPLATE_ID "template id from blynk"
+#define BLYNK_TEMPLATE_NAME "Bin Management"
+#define BLYNK_AUTH_TOKEN "auth token from blynk"
 
-const uint8_t TRIG_PIN = D5;
-const uint8_t ECHO_PIN = D6;
+const char* ssid = "YOUR_WIFI_NAME";
+const char* pass = "YOUR_WIFI_PASSWORD";
+
+
+#define TRIG D5
+#define ECHO D6
+#define SERVO D7
+
 
 // Calibrate these distances for the actual bin.
-const float EMPTY_DISTANCE_CM = 30.0; // sensor to bottom when bin is empty
-const float FULL_DISTANCE_CM = 5.0;   // sensor to waste when bin is considered full
-const int FULL_THRESHOLD = 80;
+float BIN_HEIGHT = 18.0; //sensor to bin bottom height in cm
+const int OPEN_ANGLE = 180; //value for servo motor 90 degree rotation support
+const int CLOSED_ANGLE = 0;  
+const int NUM_READINGS = 10;
+bool alertSent = false;
 
-unsigned long lastSend = 0;
-const unsigned long SEND_INTERVAL_MS = 10000;
+Servo lidServo;
 
-float readDistanceCm() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(3);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  // Timeout avoids blocking forever if no echo is received.
-  unsigned long duration = pulseIn(ECHO_PIN, HIGH, 30000UL);
-  if (duration == 0) return -1.0;
-
-  return (duration * 0.0343f) / 2.0f;
-}
-
-int calculateFillPercent(float distanceCm) {
-  float range = EMPTY_DISTANCE_CM - FULL_DISTANCE_CM;
-  if (range <= 0) return 0;
-
-  float percent = ((EMPTY_DISTANCE_CM - distanceCm) / range) * 100.0f;
-  percent = constrain(percent, 0.0f, 100.0f);
-  return (int)(percent + 0.5f);
-}
-
-void connectWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to Wi-Fi");
-
-  unsigned long started = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - started < 20000UL) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print("Connected. ESP8266 IP: ");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("Wi-Fi connection timed out.");
-  }
-}
-
-void sendReading(float distanceCm, int fillPercent) {
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWiFi();
-  }
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  WiFiClient client;
-  HTTPClient http;
-
-  if (!http.begin(client, API_URL)) {
-    Serial.println("Could not start HTTP connection.");
-    return;
-  }
-
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-
-  String body = "token=" + String(API_TOKEN)
-              + "&bin_id=" + String(BIN_ID)
-              + "&distance_cm=" + String(distanceCm, 2)
-              + "&fill_percent=" + String(fillPercent);
-
-  int responseCode = http.POST(body);
-  Serial.print("Server response: ");
-  Serial.println(responseCode);
-
-  if (responseCode > 0) {
-    Serial.println(http.getString());
-  } else {
-    Serial.println(http.errorToString(responseCode));
-  }
-  http.end();
-}
-
+//setup function runs only once
 void setup() {
   Serial.begin(115200);
-  pinMode(TRIG_PIN, OUTPUT);
-  pinMode(ECHO_PIN, INPUT);
-  digitalWrite(TRIG_PIN, LOW);
-  connectWiFi();
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  
+  lidServo.attach(SERVO);
+  lidServo.write(CLOSED_ANGLE);
+  delay(500);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  Serial.println("🗑️ BIN SYSTEM READY!");
 }
 
+
 void loop() {
-  if (millis() - lastSend >= SEND_INTERVAL_MS) {
-    lastSend = millis();
+  Blynk.run();
+  checkBinLevel();
+  delay(1000);
+}
 
-    float distanceCm = readDistanceCm();
-    if (distanceCm < 0) {
-      Serial.println("No sensor echo. Check wiring and sensor position.");
-    } else {
-      int fillPercent = calculateFillPercent(distanceCm);
-      Serial.print("Distance: ");
-      Serial.print(distanceCm);
-      Serial.print(" cm | Fill: ");
-      Serial.print(fillPercent);
-      Serial.println("%");
 
-      sendReading(distanceCm, fillPercent);
-    }
+// read ultrasonic sensor
+float getDistance() {
+  long sum = 0;
+  int valid = 0;
+  for (int i = 0; i < NUM_READINGS; i++) {
+    digitalWrite(TRIG, LOW); delayMicroseconds(2);
+    digitalWrite(TRIG, HIGH); delayMicroseconds(10);
+    digitalWrite(TRIG, LOW);
+    long duration = pulseIn(ECHO, HIGH, 30000);
+    if (duration > 0) { sum += duration; valid++; }
+    delay(50);
   }
+  if (valid == 0) return -1;
+  return (sum / valid) * 0.034 / 2;
+}
+
+//calculate bin level and sends alert through blynk app 
+void checkBinLevel() {
+  float dist = getDistance();
+  if (dist < 0 || dist > BIN_HEIGHT + 10) {
+    Serial.println("⚠ Sensor error");
+    return;
+  }
+  
+  float fillPercent = 100.0 - (dist / BIN_HEIGHT * 100.0);
+  fillPercent = constrain(fillPercent, 0, 100);
+  
+/* fillPercent = 100 - (distance/bin_height * 100)
+Example:
+If bin height = 18 cm
+dust height = 5 cm
+fill = 100 – (5/18 × 100) = 72%   */
+  
+  Blynk.virtualWrite(V0, fillPercent);
+  Blynk.virtualWrite(V2, lidServo.read());
+  
+  Serial.printf("Dist: %.1f cm | Fill: %.1f%%\n", dist, fillPercent);
+  
+  if (fillPercent >= 80.0 && !alertSent) {
+    Blynk.logEvent("bin_full", String("🚨 BIN ") + fillPercent + "% FULL!");
+    alertSent = true;
+  }
+  if (fillPercent < 70.0) alertSent = false;
+}
+
+
+//bin lid on/off via manual servo control from blynk dashboard
+BLYNK_WRITE(V1) {
+  int state = param.asInt();
+  int target = state ? OPEN_ANGLE : CLOSED_ANGLE;
+  lidServo.write(target);
+  delay(800);
+  Serial.println(state ? "🔓 OPENED 180°" : "🔒 CLOSED 0°");
 }
