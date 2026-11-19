@@ -23,9 +23,19 @@ alarm system.
 - Waste Collection Management
 - Organized Record Management
 
-## 4. Technologies Used
+## 4. Requirements
 
-*To be updated according to the technologies used in the project.*
+1. ESP8266 NodeMCU Wi-Fi module
+2. HC-SR04 ultrasonic sensor
+3. SG90 servo motor
+4. Mini Breadboard (400 points)
+5. Male-male jumper wires and male-female jumper wires
+6. Resistors (Three 1k ohm for voltage divider)
+7. REMAX power bank (10000mAh, 5V/2.1A output) and micro-USB
+cable
+8. Plastic bin with cardboard lid for prototype
+
+
 
 ## 5. Project Type
 
