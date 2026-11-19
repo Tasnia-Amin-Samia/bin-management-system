@@ -8,12 +8,12 @@ The Bin Management System is an academic project developed to support efficient 
 
 ## 2. Project Objectives
 
-• An automatic waste level detecting working prototype.
-• A fill notification when the bin is 80 percent full.
-• Remote lid control via a smartphone app.
-• Fewer inspections of materials are needed manually.
-• Cleaner and healthier atmosphere.
-• Future upgrade options like GPS, solar system, and a garbage dumping
+1. An automatic waste level detecting working prototype.
+2. A fill notification when the bin is 80 percent full.
+3. Remote lid control via a smartphone app.
+4. Fewer inspections of materials are needed manually.
+5.  Cleaner and healthier atmosphere.
+6. Future upgrade options like GPS, solar system, and a garbage dumping
 alarm system.
 
 ## 3. Key Features
